@@ -1,5 +1,5 @@
 const net = require("node:net");
-const { readFile } = require("node:fs/promises");
+const { readFile, writeFile } = require("node:fs/promises");
 const { join } = require("node:path");
 
 const args = process.argv;
@@ -88,12 +88,16 @@ const CONTENT_TYPE = Object.freeze({
 
 const HTTP_STATUS = Object.freeze({
   OK: "OK",
+  CREATED: "CREATED",
   NOT_FOUND: "NOT_FOUND",
+  INTERNAL_SERVER_ERROR: "INTERNAL_SERVER_ERROR",
 });
 
 const RESPONSE_START_LINE = Object.freeze({
   OK: "HTTP/1.1 200 OK\r\n",
+  CREATED: "HTTP/1.1 201 Created\r\n",
   NOT_FOUND: "HTTP/1.1 404 Not Found\r\n",
+  INTERNAL_SERVER_ERROR: "HTTP/1.1 500 Internal Server Error\r\n",
 });
 
 /**
@@ -118,6 +122,10 @@ async function getResponse(data) {
 
   if (httpMethod === HTTP_METHOD.GET && target.match(PATH.FILES)) {
     return await getFilesResponse(httpRequest);
+  }
+
+  if (httpMethod === HTTP_METHOD.POST && target.match(PATH.FILES)) {
+    return await getSaveFilesResponse(httpRequest);
   }
 
   return getNotFoundResponse(httpRequest);
@@ -166,6 +174,14 @@ function getRootResponse(httpRequest) {
  */
 function getNotFoundResponse(httpRequest) {
   return generateResponse({ httpStatus: HTTP_STATUS.NOT_FOUND });
+}
+
+/**
+ * @param {HttpRequest} httpRequest
+ * @returns {string}
+ */
+function getInternalServerErrorResponse(httpRequest) {
+  return generateResponse({ httpStatus: HTTP_STATUS.INTERNAL_SERVER_ERROR });
 }
 
 /**
@@ -234,6 +250,20 @@ async function getFilesResponse(httpRequest) {
 }
 
 /**
+ * @param {HttpRequest} httpRequest
+ * @returns {Promise<string>}
+ */
+async function getSaveFilesResponse(httpRequest) {
+  const { target } = httpRequest;
+  const filename = target.replace(PATH.FILES, "");
+  const isSaved = await saveFile(filename, httpRequest.body);
+
+  if (!isSaved) return getInternalServerErrorResponse(httpRequest);
+
+  return generateResponse({ httpStatus: HTTP_STATUS.CREATED });
+}
+
+/**
  * @param {string} filename
  * @returns {Promise<Buffer | null>}
  */
@@ -241,4 +271,18 @@ async function getFile(filename) {
   const path = join(directoryPath, filename);
   const file = await readFile(path).catch(() => null);
   return file;
+}
+
+/**
+ * @param {string} filename
+ * @returns {Promise<boolean>}
+ */
+async function saveFile(filename, content) {
+  try {
+    const filePath = join(directoryPath, filename);
+    await writeFile(filePath, content);
+  } catch {
+    return false;
+  }
+  return true;
 }
