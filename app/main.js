@@ -1,12 +1,28 @@
 const net = require("node:net");
+const { readFile } = require("node:fs/promises");
+const { join } = require("node:path");
+
+const args = process.argv;
+
+const directoryPath = getDirectoryPath();
+
+/**
+ * @returns {string | undefined}
+ */
+function getDirectoryPath() {
+  const directoryArgIndex = args.findIndex((arg) => "--directory" === arg);
+  if (directoryArgIndex === -1) return;
+  const directoryPath = args[directoryArgIndex + 1];
+  return directoryPath;
+}
 
 // You can use print statements as follows for debugging, they'll be visible when running tests.
 console.log("Logs from your program will appear here!");
 
 // Uncomment this to pass the first stage
 const server = net.createServer((socket) => {
-  socket.on("data", (data) => {
-    const response = getResponse(data);
+  socket.on("data", async (data) => {
+    const response = await getResponse(data);
     socket.write(response);
     socket.end();
   });
@@ -56,6 +72,7 @@ const PATH = Object.freeze({
   ROOT: "/",
   ECHO: Object.freeze(/^\/echo\//),
   USER_AGENT: "/user-agent",
+  FILES: Object.freeze(/^\/files\//),
 });
 
 const HEADER = Object.freeze({
@@ -66,6 +83,7 @@ const HEADER = Object.freeze({
 
 const CONTENT_TYPE = Object.freeze({
   TEXT: "text/plain",
+  FILE: "application/octet-stream",
 });
 
 const HTTP_STATUS = Object.freeze({
@@ -82,7 +100,7 @@ const RESPONSE_START_LINE = Object.freeze({
  * @param {Buffer} data
  * @returns {string}
  */
-function getResponse(data) {
+async function getResponse(data) {
   const httpRequest = parseRequestData(data);
   const { target, httpMethod } = httpRequest;
 
@@ -96,6 +114,10 @@ function getResponse(data) {
 
   if (httpMethod === HTTP_METHOD.GET && target === PATH.USER_AGENT) {
     return getUserAgentResponse(httpRequest);
+  }
+
+  if (httpMethod === HTTP_METHOD.GET && target.match(PATH.FILES)) {
+    return await getFilesResponse(httpRequest);
   }
 
   return getNotFoundResponse(httpRequest);
@@ -184,4 +206,39 @@ function getUserAgentResponse(httpRequest) {
     headers: responseHeaders,
     body,
   });
+}
+
+/**
+ * @param {HttpRequest} httpRequest
+ * @returns {Promise<string>}
+ */
+async function getFilesResponse(httpRequest) {
+  const { target } = httpRequest;
+  const filename = target.replace(PATH.FILES, "");
+  const file = await getFile(filename);
+  if (!file) return getNotFoundResponse(httpRequest);
+
+  const body = file;
+  const bodyLength = body.byteLength;
+
+  const responseHeaders = [
+    [HEADER.CONTENT_TYPE, CONTENT_TYPE.FILE],
+    [HEADER.CONTENT_LENGTH, bodyLength],
+  ];
+
+  return generateResponse({
+    httpStatus: HTTP_STATUS.OK,
+    headers: responseHeaders,
+    body,
+  });
+}
+
+/**
+ * @param {string} filename
+ * @returns {Promise<Buffer | null>}
+ */
+async function getFile(filename) {
+  const path = join(directoryPath, filename);
+  const file = await readFile(path).catch(() => null);
+  return file;
 }
