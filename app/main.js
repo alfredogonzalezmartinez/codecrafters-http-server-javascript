@@ -47,12 +47,49 @@ function parseRequestData(data) {
   };
 }
 
+const HTTP_METHOD = Object.freeze({
+  GET: "GET",
+  POST: "POST",
+});
+
+const PATH = Object.freeze({
+  ROOT: "/",
+  ECHO: Object.freeze(/^\/echo\//),
+});
+
 /**
  * @param {Buffer} data
  * @returns {string}
  */
 function getResponse(data) {
+  const { target, httpMethod } = parseRequestData(data);
+  if (httpMethod === HTTP_METHOD.GET && target === PATH.ROOT)
+    return "HTTP/1.1 200 OK\r\n\r\n";
+
+  if (httpMethod === HTTP_METHOD.GET && target.match(PATH.ECHO)) {
+    return getEchoResponse(data);
+  }
+
+  return "HTTP/1.1 404 Not Found\r\n\r\nNo encontrado";
+}
+
+/**
+ * @param {Buffer} data
+ * @returns {string}
+ */
+function getEchoResponse(data) {
   const { target } = parseRequestData(data);
-  if (target === "/") return "HTTP/1.1 200 OK\r\n\r\n";
-  return "HTTP/1.1 404 Not Found\r\n\r\n";
+  const message = target.replace(/^\/echo\//, "");
+  const body = decodeURIComponent(message);
+  const bodyLength = Buffer.byteLength(body);
+
+  const startLine = "HTTP/1.1 200 OK\r\n";
+  const headers = [
+    "Content-Type: text/plain\r\n",
+    `Content-Length: ${bodyLength}\r\n`,
+  ];
+  const emptyLine = "\r\n";
+
+  const response = [startLine, ...headers, emptyLine, body].join("");
+  return response;
 }
